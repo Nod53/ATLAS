@@ -1,0 +1,2 @@
+# ATLAS
+Personal discord bot
