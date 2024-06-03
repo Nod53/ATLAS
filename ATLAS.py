@@ -11,10 +11,11 @@ with open('config.json', 'r') as config_file:
     config = json.load(config_file)
 
 # Get constants from configuration
-WEATHERBIT_HOMETOWN = config["WEATHERBIT_HOMETOWN"]
 WEATHERBIT_API_KEY = config["WEATHERBIT_API_KEY"]
 DISCORD_CHANNEL_ID = config["DISCORD_CHANNEL_ID"]
 DISCORD_BOT_TOKEN = config["DISCORD_BOT_TOKEN"]
+WEATHERBIT_HOMETOWN = config["WEATHERBIT_HOMETOWN"]
+DISCORD_USER = config["DISCORD_USER"]
 
 # Define the timezone
 LOCAL_TZ = timezone('Australia/Melbourne')
@@ -30,6 +31,7 @@ class BinReminder(commands.Cog):
         self.bot = bot
         self.initial_date = datetime(2024, 6, 4, tzinfo=LOCAL_TZ)  # Starting date to align with the correct schedule
         self.glass_start_date = datetime(2024, 6, 18, tzinfo=LOCAL_TZ)  # Starting date for the glass bin schedule
+        self.reminder_active = False
 
     def determine_bins(self, for_next_week=False):
         print("Determining bins for the week")
@@ -92,29 +94,31 @@ class BinReminder(commands.Cog):
         else:
             print("No bins to remind for next week.")
 
-    @tasks.loop(minutes=30)
+    @tasks.loop(minutes=15)
     async def check_bin_reminder(self):
         now = datetime.now(LOCAL_TZ)
-        if now.weekday() == 0 and now.hour >= 20:  # Monday after 8pm
+        if now.weekday() == 0 and now.hour >= 20 and not self.reminder_active:  # Monday after 8pm
+            self.reminder_active = True
             bins_out = self.determine_bins()
             if bins_out:
                 bins_str = ", ".join(bins_out)
                 channel = self.bot.get_channel(DISCORD_CHANNEL_ID)
                 if channel is not None:
                     print(f"Sending Monday night bin reminder to channel {DISCORD_CHANNEL_ID}")
-                    await channel.send(f"@nodondisc, remember to take out the following bins tonight: {bins_str}")
+                    await channel.send(f"{DISCORD_USER}, remember to take out the following bins tonight: {bins_str}")
                 else:
                     print(f"Channel {DISCORD_CHANNEL_ID} not found")
             else:
                 print("No bins to remind for tonight.")
+        elif now.weekday() == 1:  # Reset the reminder status after Tuesday
+            self.reminder_active = False
         else:
             print("It's not Monday after 8pm. No reminder needed.")
 
     @commands.Cog.listener()
     async def on_message(self, message):
-        if message.content.lower() == "done":
-            # Stop reminders for the current Monday night
-            self.check_bin_reminder.cancel()
+        if message.content.lower() == "done" and self.reminder_active:
+            self.reminder_active = False
             await message.channel.send("Great! You've taken out the bins.")
 
 # Weather report class using Weatherbit API
@@ -176,7 +180,7 @@ async def on_ready():
     print("Sending initial weather report and bin reminder")
     await weather_report.send_weather_report()
     
-    if datetime.today(LOCAL_TZ).weekday() > 1:
+    if datetime.now(LOCAL_TZ).weekday() > 1:
         await bin_reminder.send_next_week_bin_reminder()
     else:
         await bin_reminder.send_bin_reminder()
