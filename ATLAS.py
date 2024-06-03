@@ -4,6 +4,7 @@ import requests
 import discord
 from discord.ext import commands, tasks
 from datetime import datetime, time, timedelta
+from pytz import timezone
 
 # Load configuration from config.json
 with open('config.json', 'r') as config_file:
@@ -15,6 +16,9 @@ WEATHERBIT_API_KEY = config["WEATHERBIT_API_KEY"]
 DISCORD_CHANNEL_ID = config["DISCORD_CHANNEL_ID"]
 DISCORD_BOT_TOKEN = config["DISCORD_BOT_TOKEN"]
 
+# Define the timezone
+LOCAL_TZ = timezone('Australia/Melbourne')
+
 # Bot setup
 intents = discord.Intents.default()
 intents.messages = True
@@ -24,12 +28,12 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 class BinReminder(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
-        self.initial_date = datetime(2024, 6, 4)  # Starting date to align with the correct schedule
-        self.glass_start_date = datetime(2024, 6, 18)  # Starting date for the glass bin schedule
+        self.initial_date = datetime(2024, 6, 4, tzinfo=LOCAL_TZ)  # Starting date to align with the correct schedule
+        self.glass_start_date = datetime(2024, 6, 18, tzinfo=LOCAL_TZ)  # Starting date for the glass bin schedule
 
     def determine_bins(self, for_next_week=False):
         print("Determining bins for the week")
-        today = datetime.today()
+        today = datetime.now(LOCAL_TZ)
         print(f"Today is {today}")
 
         if for_next_week or today.weekday() > 1:  # For next week or if today is after Tuesday
@@ -90,7 +94,7 @@ class BinReminder(commands.Cog):
 
     @tasks.loop(minutes=30)
     async def check_bin_reminder(self):
-        now = datetime.now()
+        now = datetime.now(LOCAL_TZ)
         if now.weekday() == 0 and now.hour >= 20:  # Monday after 8pm
             bins_out = self.determine_bins()
             if bins_out:
@@ -138,8 +142,8 @@ class WeatherReport(commands.Cog):
             data = response.json()
             print(f"Weather API response: {data}")
             weather_data = data["data"][0]
-            sunrise = datetime.fromtimestamp(weather_data['sunrise_ts']).strftime('%H:%M')
-            sunset = datetime.fromtimestamp(weather_data['sunset_ts']).strftime('%H:%M')
+            sunrise = datetime.fromtimestamp(weather_data['sunrise_ts'], LOCAL_TZ).strftime('%H:%M')
+            sunset = datetime.fromtimestamp(weather_data['sunset_ts'], LOCAL_TZ).strftime('%H:%M')
             forecast = (
                 f"{weather_data['weather']['description']}\n"
                 f"High: {weather_data['high_temp']}°C\n"
@@ -165,14 +169,14 @@ async def on_ready():
     weather_report = bot.get_cog('WeatherReport')
     
     bin_reminder.check_bin_reminder.start()
-    weather_report.daily_weather_report.change_interval(time=time(hour=6, minute=0))
+    weather_report.daily_weather_report.change_interval(time=time(hour=6, minute=0, tzinfo=LOCAL_TZ))
     weather_report.daily_weather_report.start()
 
     # Post the weather and bin reminder when the bot starts
     print("Sending initial weather report and bin reminder")
     await weather_report.send_weather_report()
     
-    if datetime.today().weekday() > 1:
+    if datetime.today(LOCAL_TZ).weekday() > 1:
         await bin_reminder.send_next_week_bin_reminder()
     else:
         await bin_reminder.send_bin_reminder()
